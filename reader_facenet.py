@@ -13,7 +13,6 @@ import uuid
 from tensorpack import *
 from cfgs.config import cfg
 
-
 def get_img_list(text_file):
     with open(text_file) as f:
         content = f.readlines()
