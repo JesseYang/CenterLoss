@@ -17,7 +17,7 @@ cfg.test_list = ["dataset/casia_cropped_20item1_test_affine_landmark_all_dataset
 cfg.img_w = 224
 cfg.img_h = 224
 
-cfg.center_loss_lr = 0.5
+cfg.center_loss_lr = 0.1
 
 cfg.center_loss_weight = 0.03
 

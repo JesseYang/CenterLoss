@@ -1,7 +1,10 @@
 train_log
 *dataflow*
 *.txt
+*.png
+*.ipynb
 *pycache*
 dataset
 *.jpg
 *tem.py
+.gitignore

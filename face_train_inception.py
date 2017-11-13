@@ -298,11 +298,11 @@ class Model(ModelDesc):
         lr = get_scalar_var('learning_rate', 0.1, summary=True)
         return tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True)
 
-def get_data(train_or_test, is_square=False):
+def get_data(train_or_test, square=False):
     isTrain = train_or_test == 'train'
 
     filename_list = cfg.train_list if isTrain else cfg.test_list
-    ds = Data(filename_list, is_square)
+    ds = Data(filename_list, is_square=square)
     if isTrain:
         augmentors = [
             # imgaug.RandomCrop(crop_shape=448),
@@ -333,7 +333,10 @@ def get_data(train_or_test, is_square=False):
     return ds
 def get_config(args):
     # pdb.set_trace()
-    dataset_train = get_data('train', args.is_square == True)
+    square = False
+    if args.is_square:
+    	square = True
+    dataset_train = get_data('train', square)
     # dataset_val = get_data('test')
 
     return TrainConfig(

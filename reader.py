@@ -71,8 +71,9 @@ class Data(RNGDataFlow):
                 ymin = ori_center_y - max_bound
                 xmax = ori_center_x + max_bound
                 ymax = ori_center_y + max_bound
-           
+            
             imgs = img[ymin:ymax, xmin:xmax]
+            # misc.imsave(str(uuid.uuid4())+".jpg",imgs)
             imgs = cv2.resize(imgs, (cfg.img_w, cfg.img_h))
             yield [imgs, label]
 

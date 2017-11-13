@@ -9,10 +9,11 @@ from scipy import misc
 import argparse
 import json
 import cv2
-
+from sklearn import metrics
+import face_validate
 from sklearn.decomposition import PCA
 import sklearn.metrics.pairwise as pw
-
+import pickle
 from tensorpack.tfutils.sesscreate import SessionCreatorAdapter, NewSessionCreator
 from tensorflow.python import debug as tf_debug
 import uuid
@@ -196,6 +197,57 @@ def recognition_person(img_path, predict_func, args):
         feature.dump({items[0]:dis1})
     feature.close()
 
+def predict_imags_based_square(pos_path, neg_path, predict_func, args, nrof_folds=10):
+    with open(pos_path, 'r') as f:
+        pos_file = f.readlines()
+        print(len(pos_file))
+    is_same_pos = [True for e in range(len(pos_file))]
+
+    with open(neg_path, 'r') as f:
+        neg_file = f.readlines()
+        print(len(neg_file))
+    is_same_neg = [False for e in range(len(neg_file))]
+
+    is_same = is_same_pos + is_same_neg
+
+    imgs_path = 'dataset/alignLfwImage'
+    embeddings = []
+    for file in [pos_file, neg_file]:
+        for item in file:
+            imgs_pairs = item.strip().split(' ')
+            image1 = os.path.join(imgs_path, imgs_pairs[0] + ".jpg")
+            image2 = os.path.join(imgs_path, imgs_pairs[1] + ".jpg")
+            print(image2)
+            dis1, dis2 = face_validate.predict_image(image1, image2, predict_func, args)
+            embeddings.append(dis1)
+            embeddings.append(dis2)
+    # import pdb
+    # pdb.set_trace()
+    # embeddings = np.asarray(embeddings, dtype=np.float32)
+    # embeddings = np.reshape(embeddings, (len(neg_file)*2*2, len(embeddings[0])))
+    # embeddings = tf.nn.l2_normalize(embeddings, 1, 1e-10, name="normalize1")
+
+    for idx, item in enumerate(embeddings):
+        maxs = np.max(item)
+        mins = np.min(item)
+        embeddingsp[idx] = (item - mins) / (maxs - mins)
+    # print(len(embeddings))
+    # print(embeddings.shape)
+    embeddings_1 = embeddings[0::2]
+    embeddings_2 = embeddings[1::2]
+    print(type(embeddings_2))
+    thresholds = np.arange(6000, 23000, 1)
+   
+ 
+    tpr, fpr, accuracy = face_validate.calculate_roc(thresholds, embeddings_1, embeddings_2, np.asarray(is_same), nrof_folds=nrof_folds)
+    print(accuracy)
+    print("Accuracy: %1.3f+-%1.3f" % (np.mean(accuracy), np.std(accuracy)))
+    auc = metrics.auc(fpr, tpr)
+    print("Area Under Curve(auc): %1.3f" % auc)
+
+
+
+
 def predict_imags(pos_path, neg_path, predict_func, args):
     with open(pos_path, 'r') as f:
         pos_file = f.readlines()
@@ -241,8 +293,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--model_path', default='train_log/face_train1023-120224/model-475431')
-    parser.add_argument('--depth', default='18', type=int, choices=[18, 34, 50, 101])
+    parser.add_argument('--depth', '-d', default='18', type=int, choices=[18, 34, 50, 101])
     parser.add_argument('--flage', action="store_true", help="resnet")
+    parser.add_argument('--is_square_validate', action="store_true", help="default cosine validate")
 
      #align by five landmark
      # parser.add_argument('--model_path', default='train_log/face_train/model-439699')
@@ -273,6 +326,8 @@ if __name__ == '__main__':
         predict_imags_train_dataset(args.test_input_pos_path, args.test_input_neg_path, predict_func, args)
     elif args.test:
         recognition_person(args.test_image, predict_func, args)
+    elif args.is_square_validate:
+        predict_imags_based_square(args.input_pos_path, args.input_neg_path, predict_func, args)
     else:
         predict_imags(args.input_pos_path, args.input_neg_path, predict_func, args)
 

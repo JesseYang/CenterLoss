@@ -1,1 +1,1 @@
-from .config_center_loss import cfg
+from .config_facenet import cfg

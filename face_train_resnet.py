@@ -34,8 +34,9 @@ class Model(ModelDesc):
                 InputDesc(tf.int32, [None], 'label')]
     def _build_graph(self, inputs):
         # with tf.device('/gpu:0'):
+       
         image, label = inputs
-      
+       
         image = tf.identity(image, name="NETWORK_INPUT")
         tf.summary.image('input-image', image, max_outputs=5)
 
@@ -112,7 +113,7 @@ class Model(ModelDesc):
 
             s_net = (LinearWrap(logits)
                     .FullyConnected("fc2", out_dim=cfg.num_class, nl=tf.identity)())
-
+        
         # logits = tf.sigmoid(logits) - 0.5
         feature = tf.identity(logits, name='FEATURE')
 
@@ -168,11 +169,11 @@ class Model(ModelDesc):
         lr = get_scalar_var('learning_rate', 0.1, summary=True)
         return tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True)
 
-def get_data(train_or_test, is_square=False):
+def get_data(train_or_test, square=False):
     isTrain = train_or_test == 'train'
 
     filename_list = cfg.train_list if isTrain else cfg.test_list
-    ds = Data(filename_list, is_square)
+    ds = Data(filename_list, is_square=square)
     if isTrain:
         augmentors = [
             # imgaug.RandomCrop(crop_shape=448),
@@ -203,7 +204,11 @@ def get_data(train_or_test, is_square=False):
     return ds
 def get_config(args):
     # pdb.set_trace()
-    dataset_train = get_data('train', args.is_square == True)
+    square = False
+    if args.is_square:
+    	square = True
+
+    dataset_train = get_data('train', square)
     # dataset_val = get_data('test')
 
     return TrainConfig(
@@ -222,7 +227,7 @@ def get_config(args):
                                       #orginal learning_rate
                                       #[(0, 1e-2), (30, 3e-3), (60, 1e-3), (85, 1e-4), (95, 1e-5)]),
                                       #new learning_rate
-                                     [(0, 1e-1)]),
+                                     [(0, 1e-2)]),
             HumanHyperParamSetter('learning_rate'),
         ],
         model=Model(args.depth),
