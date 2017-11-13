@@ -24,6 +24,7 @@ import facenet
 from reader_facenet import *
 from cfgs.config import cfg
 
+
 class Model(ModelDesc):
 
     def __init__(self, train_model):
