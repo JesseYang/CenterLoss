@@ -17,12 +17,10 @@ from tensorpack.utils.stats import RatioCounter
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
 from tensorpack.tfutils import summary
-import tensorflow.contrib.slim as slim
-
-
-from reader import *
+import shutil
+from reader_facenet import *
 from cfgs.config import cfg
-
+import facenet
 class Model(ModelDesc):
 
     def __init__(self, depth):
@@ -30,17 +28,16 @@ class Model(ModelDesc):
         self.depth = depth
 
     def _get_inputs(self):
-        return [InputDesc(tf.float32, [None, cfg.img_h, cfg.img_w, 3], 'input'),
+        return [InputDesc(tf.float32, [None, cfg.image_size, cfg.image_size, 3], 'input'),
                 InputDesc(tf.int32, [None], 'label')]
     def _build_graph(self, inputs):
         # with tf.device('/gpu:0'):
-       
         image, label = inputs
        
         image = tf.identity(image, name="NETWORK_INPUT")
         tf.summary.image('input-image', image, max_outputs=5)
 
-        image = (image - 127.5) / 128
+        image = tf.map_fn(lambda img: tf.image.per_image_standardization(img), image)
 
         image = tf.transpose(image, [0, 3, 1, 2])
 
@@ -109,71 +106,52 @@ class Model(ModelDesc):
                     .apply(layer, 'group3', block_func, 512, defs[3], 2)
                     .BNReLU('bnlast')
                     .GlobalAvgPooling('gap')
-                    .FullyConnected("fc1", out_dim=1024, nl=tf.identity)())
+                    # .FullyConnected("fc1", out_dim=1024 )
+                    .FullyConnected("fc2", out_dim=1024, nl=tf.identity)())
 
             s_net = (LinearWrap(logits)
-                    .FullyConnected("fc2", out_dim=cfg.num_class, nl=tf.identity)())
+                    .FullyConnected("fc3", out_dim=cfg.nrof_classes, W_init = tf.truncated_normal_initializer(stddev=0.1), nl=tf.identity)())
         
         # logits = tf.sigmoid(logits) - 0.5
-        feature = tf.identity(logits, name='FEATURE')
+        embeddings = tf.nn.l2_normalize(logits, 1, 1e-10, name='embeddings')
+        feature = tf.identity(embeddings, name='FEATURE')
 
             
         # softmax-loss
-        # net = tf.reshape(net, [-1])
-        # feature = tf.identity(net, name="FEATURE")
-
-        softmax_result = tf.nn.softmax(s_net)
-        softmax_result = tf.identity(softmax_result, name="PRO")
-
-        result_label = tf.reshape(s_net, (-1,cfg.num_class))
-        softmax_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=result_label, labels=label)
-        # softmax_loss = tf.reduce_sum(softmax_loss)
-        # pdb.set_trace()
+        # result_label = tf.reshape(s_net, (-1,cfg.num_class))
+        softmax_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=s_net, labels=label, name="softmax_loss")
         softmax_loss = tf.reduce_mean(softmax_loss, name="softmax_loss")
-        # loss = tf.reduce_mean(softmax_loss, name="loss")
+       
+        # center-loss
+        if cfg.center_loss_factor>0.0:
+            prelogits_center_loss, _ = facenet.center_loss(logits, label, cfg.center_loss_alfa, cfg.nrof_classes)
+            tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, prelogits_center_loss * cfg.center_loss_factor)
 
-        #tensorboard
-        # wrong = symbolic_functions.prediction_incorrect(result_label, label, name='inner')
-        # train_error = tf.reduce_mean(wrong, name='train_error')
-        # summary.add_moving_summary(train_error)
-
-        # center-loss1
-        centers = tf.get_variable('centers', [cfg.num_class, logits.get_shape()[1]], dtype=tf.float32, initializer=tf.constant_initializer(0), trainable=False)
-        label = tf.reshape(label, [-1]) # from multi dim to 1 dim  
-        centers_batch = tf.gather(centers, label)
-
-        diff = cfg.center_loss_lr * (centers_batch - logits)
-        centers = tf.scatter_sub(centers, label, diff)
-        center_loss = tf.reduce_mean(tf.square(logits - centers_batch), name="center_loss")
-        
-        #center-loss2
-        # center_loss, _ = center_loss_imp(net, label, cfg.center_loss_lr, cfg.num_class)
-
+        center_loss = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
 
         # total loss
-        loss = tf.add(softmax_loss, center_loss * cfg.center_loss_weight, name="loss")
-
+        loss = tf.add_n([softmax_loss] + center_loss, name="loss")
         if cfg.weight_decay > 0:
             wd_cost = regularize_cost('.*/W', l2_regularizer(cfg.weight_decay), name='l2_regularize_loss')
             add_moving_summary(loss, wd_cost)
-
-            add_moving_summary(softmax_loss, center_loss)
+            add_moving_summary(softmax_loss)
             self.cost = tf.add_n([loss, wd_cost], name='cost')
         else:
             
-            add_moving_summary(softmax_loss, center_loss)
+            add_moving_summary(softmax_loss)
             self.cost = tf.identity(loss, name='cost')
 
 
     def _get_optimizer(self):
         lr = get_scalar_var('learning_rate', 0.1, summary=True)
-        return tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True)
+        # return tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True)
+        return tf.train.RMSPropOptimizer(lr, decay=0.9, momentum=0.9, epsilon=1.0)
 
-def get_data(train_or_test, square=False):
+def get_data(train_or_test):
     isTrain = train_or_test == 'train'
 
     filename_list = cfg.train_list if isTrain else cfg.test_list
-    ds = Data(filename_list, is_square=square)
+    ds = Data(filename_list, cfg.shuffle)
     if isTrain:
         augmentors = [
             # imgaug.RandomCrop(crop_shape=448),
@@ -190,8 +168,8 @@ def get_data(train_or_test, square=False):
                                       [-0.5836, -0.6948, 0.4203]],
                                      dtype='float32')[::-1, ::-1]
                                  )]),
-            imgaug.Clip(),
-            imgaug.Flip(horiz=True),
+            # imgaug.Clip(),
+            # imgaug.Flip(horiz=True),
             imgaug.ToUint8()
         ]
     else:
@@ -203,12 +181,8 @@ def get_data(train_or_test, square=False):
     ds = BatchData(ds, BATCH_SIZE, remainder=not isTrain)
     return ds
 def get_config(args):
-    # pdb.set_trace()
-    square = False
-    if args.is_square:
-    	square = True
 
-    dataset_train = get_data('train', square)
+    dataset_train = get_data('train')
     # dataset_val = get_data('test')
 
     return TrainConfig(
@@ -224,14 +198,11 @@ def get_config(args):
                 # HyperParamSetterWithFunc('learning_rate',
                 #                      lambda e, x: 1e-4 * (4.0 / 5) ** (e * 2.0 / 3) ),
            ScheduledHyperParamSetter('learning_rate',
-                                      #orginal learning_rate
-                                      #[(0, 1e-2), (30, 3e-3), (60, 1e-3), (85, 1e-4), (95, 1e-5)]),
-                                      #new learning_rate
-                                     [(0, 1e-2)]),
+                                       [(0, 1e-1), (65, 1e-2), (77, 1e-3), (1000, 1e-4)]),
             HumanHyperParamSetter('learning_rate'),
         ],
         model=Model(args.depth),
-        # steps_per_epoch=1280000 / int(args.batch_size),
+        steps_per_epoch=1000,
         max_epoch=10000000,
     )
 
@@ -239,11 +210,11 @@ def get_config(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.', default='1')
-    parser.add_argument('--is_square', action='store_true', help='true for face square')
-    parser.add_argument('--batch_size', default=32)
+    parser.add_argument('--batch_size', default=90)
     parser.add_argument('-d', '--depth', help='resnet depth',
                         type=int, default=18, choices=[18, 34, 50, 101])
     parser.add_argument('--load', help='load model')
+    parser.add_argument('--log_dir', help='train_log name', required=True)
     args = parser.parse_args()
 
     if args.gpu:
@@ -253,7 +224,13 @@ if __name__ == '__main__':
     NR_GPU = len(args.gpu.split(','))
     BATCH_SIZE = int(args.batch_size) // NR_GPU
     
-    logger.auto_set_dir()
+    if args.log_dir != None:
+        if os.path.exists(os.path.join("train_log", args.log_dir)):
+            shutil.rmtree(os.path.join("train_log", args.log_dir))
+        logger.set_logger_dir(os.path.join("train_log", args.log_dir))
+    else:
+        logger.auto_set_dir()
+
     config = get_config(args)
     if args.load:
         config.session_init = get_model_loader(args.load)

@@ -41,7 +41,10 @@ class Model(ModelDesc):
         image = tf.identity(image, name="NETWORK_INPUT")
         tf.summary.image('input-image', image, max_outputs=10)
 
-        ################
+        # image = (image - 127.5) / 128
+
+        image = tf.map_fn(lambda img: tf.image.per_image_standardization(img), image)
+
         prelogits, _ = inception_resnet_v1.inference(image, cfg.keep_probability, 
             phase_train=self.train_model, bottleneck_layer_size=cfg.feature_length, 
             weight_decay=cfg.weight_decay)
@@ -68,24 +71,20 @@ class Model(ModelDesc):
 
         # Calculate the total losses
         center_loss = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+        
         # tf.summary.scalar('regularization_losses', regularization_losses)
         loss = tf.add_n([softmax_loss] + center_loss, name='loss')
-        # summary = tf.Summary()
-        # summary.value.add(tag='centerloss', simple_value=center_loss)
-        # summary.value.add(tag='softmaxloss', simple_value=softmax_loss)
-        # summary.value.add(tag='all_loss', simple_value=loss)
-        # summary_writer.add_summary(summary, 1)
-
-
+ 
+        center_loss = tf.identity(center_loss, name='center_loss')
         if cfg.weight_decay > 0:
             wd_cost = regularize_cost('.*/W', l2_regularizer(cfg.weight_decay), name='l2_regularize_loss')
             add_moving_summary(loss, wd_cost)
             add_moving_summary(softmax_loss)
-            add_moving_summary(center_loss)
+            # add_moving_summary(center_loss)
             self.cost = tf.add_n([loss, wd_cost], name='cost')
         else:
             add_moving_summary(softmax_loss)
-            add_moving_summary(center_loss)
+            # add_moving_summary(center_loss)
             self.cost = tf.identity(loss, name='cost')
     def _get_optimizer(self):
         lr = get_scalar_var('learning_rate', 0.1, summary=True)
@@ -125,15 +124,14 @@ def get_data(train_or_test):
     ds = PrefetchDataZMQ(ds, min(6, multiprocessing.cpu_count()))
     ds = BatchData(ds, BATCH_SIZE, remainder=not isTrain)
     return ds
+
 def get_config(args):
     dataset_train = get_data('train')
     # dataset_val = get_data('test')
     train_model = False
     if args.is_train == True:
         train_model = True
-    return TrainConfig(
-        dataflow=dataset_train,
-        callbacks=[
+    callbacks=[
             ModelSaver(),
             # MinSaver('cost')
             # InferenceRunner(dataset_val, [
@@ -149,17 +147,20 @@ def get_config(args):
                                       #new learning_rate
                                      # [(0, 1e-2)]),
             HumanHyperParamSetter('learning_rate'),
-        ],
-        model=Model(train_model),
-        steps_per_epoch=1000,
-        max_epoch=80,
-    )
+        ]
 
+    return TrainConfig(
+        dataflow=dataset_train,
+        model=Model(train_model),
+        callbacks=callbacks,
+        steps_per_epoch=1000,
+        max_epoch=8000000,
+    )
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.', default='0')
-    parser.add_argument('--batch_size', default=4)
+    parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.', default='1')
+    parser.add_argument('--batch_size', default=90)
     parser.add_argument('--load', help='load model')
     parser.add_argument('--is_train', help='need if train else not need', action='store_true')
     parser.add_argument('--log_dir', help='train_log name', required=True)

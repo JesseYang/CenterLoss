@@ -19,12 +19,13 @@ from tensorflow.python import debug as tf_debug
 import uuid
 import tensorflow as tf
 from tensorpack import *
+import lfw
 
 from reader import *
+
 from face_train_resnet import Model as ResnetModel
-# from reader_face_rec import *
 from face_train_inception import Model as InceptionModel
-##resnet
+from demo import Model as FaceNetModel
 
 
 from cfgs.config import cfg
@@ -197,6 +198,64 @@ def recognition_person(img_path, predict_func, args):
         feature.dump({items[0]:dis1})
     feature.close()
 
+def get_paths(lfw_dir, pairs):
+    nrof_skipped_pairs = 0
+    path_list = []
+    issame_list = []
+    for pair in pairs:
+        if len(pair) == 3:
+            path0 = os.path.join(lfw_dir, pair[0], pair[0] + '_' + '%04d' % int(pair[1])+'_0.png')
+            path1 = os.path.join(lfw_dir, pair[0], pair[0] + '_' + '%04d' % int(pair[2])+'_0.png')
+            issame = True
+        elif len(pair) == 4:
+            path0 = os.path.join(lfw_dir, pair[0], pair[0] + '_' + '%04d' % int(pair[1])+'_0.png')
+            path1 = os.path.join(lfw_dir, pair[2], pair[2] + '_' + '%04d' % int(pair[3])+'_0.png')
+            issame = False
+    
+        if os.path.exists(path0) and os.path.exists(path1):    # Only add the pair if both paths exist
+            path_list += (path0,path1)
+            issame_list.append(issame)
+        else:
+            nrof_skipped_pairs += 1
+    if nrof_skipped_pairs>0:
+        print('Skipped %d image pairs' % nrof_skipped_pairs)
+    
+    return path_list, issame_list##12000, 6000
+
+def lfw_validates(lfw_dir, lfw_pairs, predict_func, img_batch_size=100):
+
+    pairs = []
+    with open(lfw_pairs, 'r') as f:
+        for line in f.readlines()[1:]:
+            pair = line.strip().split()
+            pairs.append(pair)
+    
+    lfw_paths, actual_issame = get_paths(lfw_dir, np.array(pairs))
+
+    assert (len(lfw_paths) == 12000 and len(actual_issame) == 6000), "validate dataset length not equal"
+    assert (len(lfw_paths) % img_batch_size == 0), "img_batch_size error"
+    
+    img_epochs = len(lfw_paths) // img_batch_size
+    img_embeddings = np.zeros((len(lfw_paths), 128))
+    for i in range(img_epochs):
+        imgs = []
+        for line in (lfw_paths[i*img_batch_size : i*img_batch_size+img_batch_size]):
+           
+            assert (os.path.exists(line)), 'img not exists'
+            imgs.append(misc.imread(line, mode='RGB'))
+      
+        predict_result = predict_func([imgs])[0]#batch_size * 128
+        img_embeddings[i*img_batch_size : i*img_batch_size+img_batch_size]=predict_result
+
+    _, _, accuracy, best_threshold, val, val_std, far = lfw.evaluate(img_embeddings, actual_issame, nrof_folds=10)
+    print('Best threshold array: ', best_threshold)
+    print('Mean thrshold: %2.4f' %  np.mean(best_threshold))
+    print('Accuracy: %1.3f+-%1.3f' % (np.mean(accuracy), np.std(accuracy)))
+    print('Validation rate: %2.5f+-%2.5f @ FAR=%2.5f' % (val, val_std, far))
+
+
+
+
 def predict_imags_based_square(pos_path, neg_path, predict_func, args, nrof_folds=10):
     with open(pos_path, 'r') as f:
         pos_file = f.readlines()
@@ -275,7 +334,15 @@ def predict_imags(pos_path, neg_path, predict_func, args):
 
 def get_pred_func(args):
     sess_init = SaverRestore(args.model_path)
-
+    if args.lfw_validate:
+        model = FaceNetModel(False)
+        predict_config = PredictConfig(session_init = sess_init,
+                                    model = model,
+                                    input_names = ["input"],
+                                    output_names = ["FEATURE"])
+        predict_func = OfflinePredictor(predict_config)
+        return predict_func
+    
     if args.flage:
         model = ResnetModel(args.depth)
     else:
@@ -311,12 +378,14 @@ if __name__ == '__main__':
 
     parser.add_argument('--test', action="store_true", help="test_json")
     parser.add_argument('--test_image', default="test_image.jpg", help="test image path")
+
+    #validate on lfw
+    parser.add_argument('--lfw_validate', action="store_true", help="if validate on lfw")
+    parser.add_argument('--lfw_pairs', default='pairs.txt', help="lfw pairs txt")
+    parser.add_argument('--lfw_img_batch_size', type=int, default='100')
+    parser.add_argument('--lfw_dir', default='/home/user/yjf/facenet_test/dataset_lfw_align_160', help="lfw dir path after align")
     args = parser.parse_args()
-   
-    # if os.path.isdir("output"):
-    #     shutil.rmtree("output")
-    # os.mkdir('output')
- 
+
 
     predict_func = get_pred_func(args)
 
@@ -328,6 +397,8 @@ if __name__ == '__main__':
         recognition_person(args.test_image, predict_func, args)
     elif args.is_square_validate:
         predict_imags_based_square(args.input_pos_path, args.input_neg_path, predict_func, args)
+    elif args.lfw_validate:
+        lfw_validates(args.lfw_dir, args.lfw_pairs, predict_func, args.lfw_img_batch_size)
     else:
         predict_imags(args.input_pos_path, args.input_neg_path, predict_func, args)
 

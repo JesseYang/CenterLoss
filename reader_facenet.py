@@ -50,6 +50,7 @@ class Data(RNGDataFlow):
             if cfg.random_crop == True:#crop form 182 to 160
                 # img = process(img)
                 img_h, img_w, _ = img.shape
+                assert (img_h >= cfg.image_size and img_w >= cfg.image_size),'img_h length error while reader data'
                 h_range = random.randint(0, img_h - cfg.image_size)
                 w_range = random.randint(0, img_w - cfg.image_size)
                 img = img[h_range:h_range + cfg.image_size, w_range:w_range + cfg.image_size]
@@ -62,15 +63,16 @@ class Data(RNGDataFlow):
                 # misc.imsave(str(uuid.uuid4())+".jpg",img) 
             # misc.imsave(str(uuid.uuid4())+".jpg",img)
             # img = (img - np.average(img) / np.std(img))#per_image_standardization
+            
             yield [img, label]
 
 if __name__ == '__main__':
     ds = Data(cfg.train_list)
-    ds.reset_state()
-    count = 0
-    while count<1:
-        g = ds.get_data()
-        dp = next(g)
-        count += 1
+    # ds.reset_state()
+    # count = 0
+    # while count<1:
+    #     g = ds.get_data()
+    #     dp = next(g)
+    #     count += 1
     # import pdb
     # pdb.set_trace()
