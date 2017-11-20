@@ -1,4 +1,6 @@
 train_log
+*.json
+test_image
 *dataflow*
 *.txt
 *.png
@@ -8,3 +10,4 @@ dataset
 *.jpg
 *tem.py
 .gitignore
+test_*

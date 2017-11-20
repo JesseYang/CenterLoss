@@ -24,7 +24,7 @@ def get_img_list(text_file):
 
 class Data(RNGDataFlow):
 
-    def __init__(self, filename_list, shuffle=True):
+    def __init__(self, filename_list, is_train=True, shuffle=True):
         self.filename_list = filename_list
 
         if isinstance(filename_list, list) == False:
@@ -33,7 +33,8 @@ class Data(RNGDataFlow):
         self.imglist = []
         for filename in filename_list:
             self.imglist.extend(get_img_list(filename))
-        self.shuffle = shuffle
+        self.is_train = is_train
+        self.shuffle = is_train and shuffle
     def size(self):
         return len(self.imglist)
 
@@ -47,7 +48,7 @@ class Data(RNGDataFlow):
                 continue
             img = misc.imread(img_path, mode='RGB')
            
-            if cfg.random_crop == True:#crop form 182 to 160
+            if self.is_train and cfg.random_crop == True:#crop form 182 to 160
                 # img = process(img)
                 img_h, img_w, _ = img.shape
                 assert (img_h >= cfg.image_size and img_w >= cfg.image_size),'img_h length error while reader data'
@@ -58,7 +59,7 @@ class Data(RNGDataFlow):
             else:
                 img = cv2.resize(img, (cfg.image_size, cfg.image_size))
             
-            if cfg.random_flip == True and (random.uniform(0, 1) > 0.5):#random flip
+            if self.is_train and cfg.random_flip == True and (random.uniform(0, 1) > 0.5):#random flip
                 img = np.fliplr(img)
                 # misc.imsave(str(uuid.uuid4())+".jpg",img) 
             # misc.imsave(str(uuid.uuid4())+".jpg",img)

@@ -10,7 +10,7 @@ import argparse
 import json
 import cv2
 from sklearn import metrics
-import face_validate
+
 from sklearn.decomposition import PCA
 import sklearn.metrics.pairwise as pw
 import pickle
@@ -20,34 +20,17 @@ import uuid
 import tensorflow as tf
 from tensorpack import *
 import lfw
+import json
 
-from reader import *
+from reader_facenet import *
 
 from face_train_resnet import Model as ResnetModel
-from face_train_inception import Model as InceptionModel
-from demo import Model as FaceNetModel
+
+from face_train_inception_resnet_v1 import Model as Inception_Resnet_V1_Model
 
 
 from cfgs.config import cfg
 
-def PCA(data, K):
-    # 数据标准化
-    m = mean(data, axis=0) # 每列均值
-    data -= m
-    # 协方差矩阵
-    C = cov(transpose(data))
-    # 计算特征值特征向量，按降序排序
-    evals, evecs = linalg.eig(C)
-    indices = argsort(evals) # 返回从小到大的索引值
-    indices = indices[::-1] # 反转
-
-    evals = evals[indices] # 特征值从大到小排列
-    evecs = evecs[:, indices] # 排列对应特征向量
-    evecs_K_max = evecs[:, :K] # 取最大的前K个特征值对应的特征向量
-
-    # 产生新的数据矩阵
-    finaldata = dot(data, evecs_K_max)
-    return finaldata
 
 def predict_image_pairs(image1, image2, predict_func, args):
     if args.flage:
@@ -197,7 +180,7 @@ def recognition_person(img_path, predict_func, args):
         dis1 = np.hstack((predict_result[0,:], predict_result[1,:]))
         feature.dump({items[0]:dis1})
     feature.close()
-
+##yjf
 def get_paths(lfw_dir, pairs):
     nrof_skipped_pairs = 0
     path_list = []
@@ -221,8 +204,8 @@ def get_paths(lfw_dir, pairs):
         print('Skipped %d image pairs' % nrof_skipped_pairs)
     
     return path_list, issame_list##12000, 6000
-
-def lfw_validates(lfw_dir, lfw_pairs, predict_func, img_batch_size=100):
+###yjf
+def predict_inception_resnet_v1_structure(lfw_dir, lfw_pairs, predict_func, img_batch_size=100, flage=False):
 
     pairs = []
     with open(lfw_pairs, 'r') as f:
@@ -236,25 +219,78 @@ def lfw_validates(lfw_dir, lfw_pairs, predict_func, img_batch_size=100):
     assert (len(lfw_paths) % img_batch_size == 0), "img_batch_size error"
     
     img_epochs = len(lfw_paths) // img_batch_size
-    img_embeddings = np.zeros((len(lfw_paths), 128))
+    img_embeddings = np.zeros((len(lfw_paths), cfg.feature_length))
     for i in range(img_epochs):
         imgs = []
         for line in (lfw_paths[i*img_batch_size : i*img_batch_size+img_batch_size]):
            
             assert (os.path.exists(line)), 'img not exists'
-            imgs.append(misc.imread(line, mode='RGB'))
+            img = misc.imread(line, mode='RGB')
+            if flage == True:
+                img = cv2.resize(img, (cfg.image_size, cfg.image_size))
+            imgs.append(img)
       
         predict_result = predict_func([imgs])[0]#batch_size * 128
+       
         img_embeddings[i*img_batch_size : i*img_batch_size+img_batch_size]=predict_result
 
     _, _, accuracy, best_threshold, val, val_std, far = lfw.evaluate(img_embeddings, actual_issame, nrof_folds=10)
     print('Best threshold array: ', best_threshold)
+    print('Each accuracy: ', accuracy)
     print('Mean thrshold: %2.4f' %  np.mean(best_threshold))
     print('Accuracy: %1.3f+-%1.3f' % (np.mean(accuracy), np.std(accuracy)))
     print('Validation rate: %2.5f+-%2.5f @ FAR=%2.5f' % (val, val_std, far))
 
 
+def face_recognition_collect_feature(predict_func, imgs_path):
+    images = os.listdir(imgs_path)
+    features = {}
+    facenames = []
+    imgs = []
+    # for idx, face in enumerate(images):
+    #     print(face)
+    #     facenames.append(face.split(".")[0])
+    #     img = misc.imread(os.path.join(imgs_path, face), mode='RGB')
+    #     imgs.append(cv2.resize(img, (160, 160)))
+    # print(facenames)
+    # predict_result = predict_func([imgs])[0]
+    # print(predict_result.shape)
+    # for i in range(predict_result.shape[0]):
+    #     features[facenames[i]] = predict_result[i].tolist()
+    # print(features)
+    # result = open("face_feature.json", 'w')
+    # result.write(json.dumps(features))
 
+
+    for idx, face in enumerate(images):
+        facenames.append(face.split(".")[0])
+        img = misc.imread(os.path.join(imgs_path, face), mode='RGB')
+        imgs.append(cv2.resize(img, (160, 160)))
+        predict_result = predict_func([imgs])[0]
+        features[facenames[idx]] = predict_result[0].tolist()
+    print(features)
+    result = open("face_feature.json", 'w')
+    result.write(json.dumps(features))
+
+    print("over")
+
+ 
+def face_recognition_realtime(predict_func, video_path):
+    assert (os.path.exists(video_path)), 'video_path does not exists'
+    cap = cv2.videoCapture(video_path)
+    frame_idx = 0
+    if cap.isOpened == False:
+        cap.open(video_path)
+
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    videoWrite = cv2.VideoWriter("face_recognition_result.mp4", cv2.VideoWriter_fourcc(*'mp4v'),30,(width, height))
+
+    while cap.isOpened:
+        ret, img = cap.read()
+        if ret == False:
+            break
+        
 
 def predict_imags_based_square(pos_path, neg_path, predict_func, args, nrof_folds=10):
     with open(pos_path, 'r') as f:
@@ -298,7 +334,7 @@ def predict_imags_based_square(pos_path, neg_path, predict_func, args, nrof_fold
     thresholds = np.arange(6000, 23000, 1)
    
  
-    tpr, fpr, accuracy = face_validate.calculate_roc(thresholds, embeddings_1, embeddings_2, np.asarray(is_same), nrof_folds=nrof_folds)
+    tpr, fpr, accuracy = facenet.calculate_roc(thresholds, embeddings_1, embeddings_2, np.asarray(is_same), nrof_folds=nrof_folds)
     print(accuracy)
     print("Accuracy: %1.3f+-%1.3f" % (np.mean(accuracy), np.std(accuracy)))
     auc = metrics.auc(fpr, tpr)
@@ -334,19 +370,10 @@ def predict_imags(pos_path, neg_path, predict_func, args):
 
 def get_pred_func(args):
     sess_init = SaverRestore(args.model_path)
-    if args.lfw_validate:
-        model = FaceNetModel(False)
-        predict_config = PredictConfig(session_init = sess_init,
-                                    model = model,
-                                    input_names = ["input"],
-                                    output_names = ["FEATURE"])
-        predict_func = OfflinePredictor(predict_config)
-        return predict_func
-    
     if args.flage:
-        model = ResnetModel(args.depth)
+        model = ResnetModel(args.depth)    
     else:
-        model = InceptionModel()
+        model = Inception_Resnet_V1_Model(False)
 
     predict_config = PredictConfig(session_init = sess_init,
                                     model = model,
@@ -359,28 +386,13 @@ def get_pred_func(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--model_path', default='train_log/face_train1023-120224/model-475431')
-    parser.add_argument('--depth', '-d', default='18', type=int, choices=[18, 34, 50, 101])
-    parser.add_argument('--flage', action="store_true", help="resnet")
-    parser.add_argument('--is_square_validate', action="store_true", help="default cosine validate")
 
-     #align by five landmark
-     # parser.add_argument('--model_path', default='train_log/face_train/model-439699')
+    parser.add_argument('--model_path', default='train_log/facenet_mix_per_image_standardizatio/model-219000')
+    parser.add_argument('--video_path', help='video path')
+    parser.add_argument('--generate_face_feature', help='aligned face img path')
+    parser.add_argument('--flage', action="store_true", help="resnet or inception_resnet_v1 network, true for resnet")
+    parser.add_argument('--depth', default='18', type=int, choices=[18, 34, 50, 101])
 
-    parser.add_argument('--input_image1')
-    parser.add_argument('--input_image2', default='5.jpg')
-
-    parser.add_argument('--input_pos_path', default='dataset/POSTIVE_PAIR.txt')
-    parser.add_argument('--input_neg_path', default='dataset/NEGATIVE_PAIR.txt')
-
-    parser.add_argument('--test_input_pos_path')
-    parser.add_argument('--test_input_neg_path', default='dataset/train_test_on_webface_neg_test.txt')
-
-    parser.add_argument('--test', action="store_true", help="test_json")
-    parser.add_argument('--test_image', default="test_image.jpg", help="test image path")
-
-    #validate on lfw
-    parser.add_argument('--lfw_validate', action="store_true", help="if validate on lfw")
     parser.add_argument('--lfw_pairs', default='pairs.txt', help="lfw pairs txt")
     parser.add_argument('--lfw_img_batch_size', type=int, default='100')
     parser.add_argument('--lfw_dir', default='/home/user/yjf/facenet_test/dataset_lfw_align_160', help="lfw dir path after align")
@@ -388,19 +400,11 @@ if __name__ == '__main__':
 
 
     predict_func = get_pred_func(args)
-
-    if args.input_image1 != None:
-        predict_image_pairs(args.input_image1, args.input_image2, predict_func, args)
-    elif args.test_input_pos_path != None:
-        predict_imags_train_dataset(args.test_input_pos_path, args.test_input_neg_path, predict_func, args)
-    elif args.test:
-        recognition_person(args.test_image, predict_func, args)
-    elif args.is_square_validate:
-        predict_imags_based_square(args.input_pos_path, args.input_neg_path, predict_func, args)
-    elif args.lfw_validate:
-        lfw_validates(args.lfw_dir, args.lfw_pairs, predict_func, args.lfw_img_batch_size)
+    # if args.video_path != None:
+    #     face_recognition_realtime(predict_func, args.video_path)
+    if args.generate_face_feature != None:
+        face_recognition_collect_feature(predict_func, args.generate_face_feature)
     else:
-        predict_imags(args.input_pos_path, args.input_neg_path, predict_func, args)
-
+        predict_inception_resnet_v1_structure(args.lfw_dir, args.lfw_pairs, predict_func, args.lfw_img_batch_size, args.flage)
     
 

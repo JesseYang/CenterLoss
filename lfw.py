@@ -38,10 +38,12 @@ def evaluate(embeddings, actual_issame, nrof_folds=10):
     embeddings2 = embeddings[1::2]
     tpr, fpr, accuracy, best_threshold = facenet.calculate_roc(thresholds, embeddings1, embeddings2,
         np.asarray(actual_issame), nrof_folds=nrof_folds)
-    thresholds = np.arange(0, 4, 0.001)
-    val, val_std, far = facenet.calculate_val(thresholds, embeddings1, embeddings2,
-        np.asarray(actual_issame), 1e-3, nrof_folds=nrof_folds)
-    return tpr, fpr, accuracy, best_threshold,  val, val_std, far
+    # thresholds = np.arange(0, 4, 0.001)
+
+    # val, val_std, far = facenet.calculate_val(thresholds, embeddings1, embeddings2,
+    #     np.asarray(actual_issame), 1e-3, nrof_folds=nrof_folds)
+    # return tpr, fpr, accuracy, best_threshold,  val, val_std, far
+    return tpr, fpr, accuracy, best_threshold
 
 def get_paths(lfw_dir, pairs, file_ext):
     nrof_skipped_pairs = 0
